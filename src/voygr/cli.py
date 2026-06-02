@@ -245,8 +245,29 @@ def _batch_check(ctx, api_key, base_url, input_file):
         if "name" not in reader.fieldnames or "address" not in reader.fieldnames:
             raise click.UsageError("CSV must have 'name' and 'address' columns.")
 
+        try:
+            first_row = next(reader)
+        except StopIteration:
+            raise click.UsageError("CSV file contains no data rows.")
+
         with create_client(api_key=api_key, base_url=base_url, debug=debug) as client:
-            for i, row in enumerate(reader, 1):
+            checked_count = 1
+            if is_tty:
+                click.echo(f"\rProcessing 1...", nl=False, err=True)
+            try:
+                result = client.check(name=first_row["name"], address=first_row["address"])
+                click.echo(json.dumps(result))
+            except APIError as e:
+                error_count += 1
+                error_record = {
+                    "error": e.error_code or "CLIENT_ERROR",
+                    "message": str(e),
+                    "input_name": first_row["name"],
+                    "input_address": first_row["address"],
+                }
+                click.echo(json.dumps(error_record))
+
+            for i, row in enumerate(reader, 2):
                 checked_count = i
                 if is_tty:
                     click.echo(f"\rProcessing {i}...", nl=False, err=True)
@@ -262,9 +283,6 @@ def _batch_check(ctx, api_key, base_url, input_file):
                         "input_address": row["address"],
                     }
                     click.echo(json.dumps(error_record))
-
-            if checked_count == 0:
-                raise click.UsageError("CSV file is empty.")
 
             if is_tty:
                 click.echo(f"\rCompleted {checked_count} checks.        ", err=True)
